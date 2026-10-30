@@ -11,6 +11,8 @@ export function createFeed({
     mmPerWork,
     installation: "spm-automated-test",
     complete: true,
+    // Oldest days left unrecorded. `complete: false` alone leaves one missing.
+    missingDays: 0,
     stale: false,
     badCalibration: false,
     sourceError: false,
@@ -37,6 +39,9 @@ export function createFeed({
       counterEpoch: "automated-epoch",
     },
   });
+  const recordedFrom = () =>
+    state.complete ? state.missingDays : Math.max(1, state.missingDays);
+  const missing = (index) => index < recordedFrom();
   const stats = () => ({
     schemaVersion: 1,
     installationId: state.installation,
@@ -47,17 +52,16 @@ export function createFeed({
         date,
         coverage: {
           expectedRoundCount: 144,
-          observedRoundCount: !state.complete && index === 0 ? 0 : 144,
-          coverageBps: !state.complete && index === 0 ? 0 : 10000,
+          observedRoundCount: missing(index) ? 0 : 144,
+          coverageBps: missing(index) ? 0 : 10000,
         },
-        observedWorkUnits: String(dailyWork),
-        distanceMm:
-          !state.complete && index === 0
-            ? null
-            : String(
-                dailyWork * mmPerWork +
-                  (state.badCalibration && index === 0 ? 1 : 0),
-              ),
+        observedWorkUnits: missing(index) ? "0" : String(dailyWork),
+        distanceMm: missing(index)
+          ? null
+          : String(
+              dailyWork * mmPerWork +
+                (state.badCalibration && index === recordedFrom() ? 1 : 0),
+            ),
       })),
     },
   });

@@ -4,7 +4,7 @@
 
 SPM is a friendly prediction tool: the vote comes first, followed by evidence and public scores. Warm paper surfaces, forest-green actions and a small illustrated hamster wheel connect the product to Squeektoshi without a separate marketing hero. The main action remains on the first 390px-wide screen. The illustration is decorative; measurements, source status and points are always HTML text.
 
-The canonical implementation is `src/styles.css`, with page composition in `src/App.tsx` and reusable controls in `src/components/`. The final export was viewed at 390 and 1440 wide; automated Chromium/WebKit checks also cover 320 and 768. The site has one intentionally light theme and English copy.
+The canonical implementation is `src/styles.css`, with page composition in `src/App.tsx` and reusable controls in `src/components/`. The final export was viewed at 390 and 1440 wide; automated browser checks also cover 320 and 768 (Chromium only in the three-day-average release; WebKit could not launch on that machine). The site has one intentionally light theme and English copy.
 
 ## Colors
 
@@ -81,8 +81,10 @@ Main surfaces are flat: a 1px structural border and no shadow. The wheel uses a 
 | `ConnectSheet` | `src/components/ConnectSheet.tsx` | Named EIP-6963 extensions, generic fallback when needed, official local marks, phone links, Coinbase, row pending/disabled/error states; connected wallet details and disconnect |
 | `.primary`, `.secondary`, `.text-button`, `.icon-button` | `src/styles.css` | One filled main action per panel; clear hover, press and keyboard focus; primary minimum 48px, secondary 44px, icon 40px; disabled controls explain why nearby |
 | Prediction options | `src/App.tsx`, `.prediction-option` | Native labelled radio group, arrow-key behavior, visible selected check, 12px spacing, 2px focus ring on containing label |
-| `ActivePrediction` | `src/App.tsx` | Frozen side/target, countdown, due time and awaiting-evidence copy; no editable choice while pending |
-| `HistoryChart` | `src/App.tsx` | Solid complete bars, hatched incomplete bars, explicit unavailable state, chart description and native disclosure containing daily values |
+| Baseline metric | `src/App.tsx`, `.baseline-metric` | Ready: display-size km/day average, “Average of the last three complete days” caption (the count follows the data, 3–7) and a check-icon “Baseline ready” label. Collecting: `n / 3` complete days with a clock-icon label. Loading skeleton and “Feed unavailable” with retry |
+| Baseline notes | `src/App.tsx`, `.baseline-note` | 14px secondary text under one divider. Fewer than seven days: a note that the target uses the complete days so far and grows to seven. Paused service reason. Consecutive notes share the first note’s divider (`.baseline-note + .baseline-note`) |
+| `ActivePrediction` | `src/App.tsx` | Frozen side/target, countdown, due time and awaiting-evidence copy; the target shows its locked day count as secondary `.target-days` text (“· 3-day average”); no editable choice while pending |
+| `HistoryChart` | `src/App.tsx` | Always the last seven calendar days. Solid complete bars, hatched incomplete bars, explicit unavailable state, chart description and native disclosure containing daily values. The summary names the averaged span (“Three-day average” up to “Seven-day average”) |
 | `LeaderboardRows` / `FullLeaderboard` | `src/App.tsx` | Shared data, points and ranks; accessible full-address disclosure; distinct loading/error/empty/unconfigured states and bounded pagination |
 | `ServiceSettings` | `src/App.tsx` | Labelled URL field, inline validation, pending check and save; validates an actual compatible service before accepting it |
 | `Wheel` | `src/components/Wheel.tsx` | Decorative local SVG; live distance, source link and status text are separate HTML |
@@ -95,9 +97,9 @@ Motion is limited to 120ms named-property transitions using `cubic-bezier(.2,0,0
 
 - Reuse the shell, grid and semantic tokens before introducing another surface or text style.
 - Keep the vote and its action above the illustration on narrow screens. Put instructions beside the relevant control.
-- Preserve distinct unavailable, incomplete, pending and zero states. Never fill a missing measurement, wallet score or public leaderboard with sample data.
+- State how many days a target averages whenever it is fewer than seven. Preserve distinct unavailable, incomplete, pending and zero states. Never fill a missing measurement, wallet score or public leaderboard with sample data.
 - Keep one typography scale and the existing action hierarchy. Decorative illustration colors do not become new button colors.
 - Use native controls and disclosures, wrap full addresses, and keep dialogs in the native modal top layer.
 - For another page, start with `page-shell`, one task heading, a `surface` section and existing button variants; retain wallet access in the header and use fragment navigation for static hosting.
 
-The six-domain review, fixes and unperformed manual checks are recorded in `artifacts/validation.md`. Design-reference attribution is in `artifacts/NOTICE.md`.
+The six-domain review, fixes and unperformed manual checks are recorded in `artifacts/validation.md`. The design review used Jakub Krehel’s Better Interface guidance (MIT) and Paul Bakaus’s Impeccable documentation method (Apache-2.0), as adapted in the pinned review guide.

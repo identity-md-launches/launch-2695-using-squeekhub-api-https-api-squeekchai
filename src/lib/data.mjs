@@ -2,6 +2,10 @@ export const DAY = 86_400_000;
 export const SOURCE = "https://api.squeekchain.com";
 export const STATS_URL = `${SOURCE}/v1/measurement/stats?range=30d`;
 export const STATUS_URL = `${SOURCE}/v1/status`;
+// The window is the last seven complete days. Until a full week exists, voting opens on the
+// complete days recorded so far, starting at three, and the average grows to seven by itself.
+export const WINDOW_DAYS = 7;
+export const MIN_DAYS = 3;
 
 export function deviceDay(time) {
   return new Date(new Date(time).getTime() - 12 * 3_600_000)
@@ -10,8 +14,8 @@ export function deviceDay(time) {
 }
 export function expectedDates(time) {
   const noon = Date.parse(`${deviceDay(time)}T12:00:00.000Z`);
-  return Array.from({ length: 7 }, (_, index) =>
-    new Date(noon - (7 - index) * DAY).toISOString().slice(0, 10),
+  return Array.from({ length: WINDOW_DAYS }, (_, index) =>
+    new Date(noon - (WINDOW_DAYS - index) * DAY).toISOString().slice(0, 10),
   );
 }
 const integer = (value) => typeof value === "string" && /^\d+$/.test(value);
@@ -92,7 +96,8 @@ export function summarize(stats, now = Date.now()) {
     averageMm: complete.length
       ? (sum / BigInt(complete.length)).toString()
       : null,
-    ready: complete.length === 7,
+    ready: complete.length >= MIN_DAYS,
+    fullWeek: complete.length === WINDOW_DAYS,
     generatedAt: stats.generatedAt,
     installationId: stats.installationId,
   };
@@ -133,8 +138,11 @@ export function isFresh(status, now = Date.now()) {
     age <= 120_000
   );
 }
-export function outcome(distanceMm, totalMm) {
-  const comparison = BigInt(distanceMm) * 7n - BigInt(totalMm);
+// Compares one day's distance with total / days exactly, without rounding the average.
+export function outcome(distanceMm, totalMm, days = WINDOW_DAYS) {
+  if (!Number.isInteger(days) || days < 1)
+    throw new Error("A baseline needs at least one day.");
+  const comparison = BigInt(distanceMm) * BigInt(days) - BigInt(totalMm);
   return comparison > 0n ? "over" : comparison < 0n ? "under" : "tie";
 }
 export function km(mm, digits = 2) {

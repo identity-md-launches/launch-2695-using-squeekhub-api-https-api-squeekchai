@@ -61,14 +61,18 @@ async function eventually(fn, message) {
   assert.fail(message);
 }
 try {
+  // SPM_BROWSERS=chromium limits the run where a machine lacks one engine's system libraries.
+  const engines = (process.env.SPM_BROWSERS || "chromium,webkit").split(",");
   for (const [engine, type] of [
     ["chromium", chromium],
     ["webkit", webkit],
-  ]) {
+  ].filter(([engine]) => engines.includes(engine))) {
     feed.state.now = Date.now();
     feed.state.archiveThrough = feed.state.now;
     feed.state.installation = `spm-browser-${engine}`;
     feed.state.passages = [];
+    // The live state at this release: three complete days, the four oldest still unrecorded.
+    feed.state.missingDays = 4;
     await service.sync();
     browser = await type.launch({
       headless: true,
@@ -169,7 +173,13 @@ try {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`${origin}/preview/`);
-    await page.getByText("The last seven complete days").waitFor();
+    await page.getByText("Average of the last three complete days").waitFor();
+    await check(`${engine}: three-day starter average opens voting`, async () => {
+      await page.getByText("the target uses the three complete days so far").waitFor();
+      await page.getByText("Three-day average").waitFor();
+      assert.equal(service.market().ready, true);
+      assert.equal(service.market().baseline.completeDays, 3);
+    });
     await check(
       `${engine}: static export at gateway subpath and metadata`,
       async () => {
@@ -539,7 +549,7 @@ try {
       await page.getByRole("button", { name: "Rules & scoring" }).click();
       await page
         .getByRole("dialog")
-        .getByText("Seven days set the target.")
+        .getByText("Recent days set the target.")
         .waitFor();
       await page.getByRole("button", { name: "Got it" }).click();
       await page.locator(".connect-button").click();

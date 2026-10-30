@@ -10,6 +10,8 @@ import {
   calibration,
   isFresh,
   outcome,
+  MIN_DAYS,
+  WINDOW_DAYS,
 } from "../src/lib/data.mjs";
 const { isAddress, getAddress, verifyMessage, createPublicClient, http } =
   dependencyRequire("viem");
@@ -42,6 +44,17 @@ export function createService({
     CREATE INDEX IF NOT EXISTS passage_time ON passages(installation,time);
     CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `);
+  // Each vote keeps how many complete days its target averaged. Rows from before this column were all seven-day.
+  for (const table of ["challenges", "predictions"])
+    if (
+      !db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .some((column) => column.name === "days")
+    )
+      db.exec(
+        `ALTER TABLE ${table} ADD COLUMN days INTEGER NOT NULL DEFAULT ${WINDOW_DAYS}`,
+      );
   const meta = (key) =>
     db.prepare("SELECT value FROM metadata WHERE key=?").get(key)?.value;
   const setMeta = (key, value) =>
@@ -119,7 +132,7 @@ export function createService({
     )
       return "Waiting for a fresh history snapshot.";
     if (!base.ready)
-      return `Waiting for seven complete days (${base.completeDays}/7 available).`;
+      return `Waiting for ${MIN_DAYS} complete days (${base.completeDays}/${MIN_DAYS} available).`;
     try {
       calibration(
         stats,
@@ -178,7 +191,8 @@ export function createService({
       startAt: row.start,
       expiresAt: row.expires,
       totalMm: row.total,
-      averageMm: (BigInt(row.total) / 7n).toString(),
+      averageMm: (BigInt(row.total) / BigInt(row.days)).toString(),
+      baselineDays: row.days,
       state: row.state,
       distanceMm: row.distance,
       settledAt: row.settled,
@@ -231,8 +245,8 @@ export function createService({
       `Service: ${origin}`,
       `Wallet: ${getAddress(address)}`,
       `Prediction: ${side}`,
-      `Seven-day distance total: ${base.totalMm} mm`,
-      "Target: seven-day distance total divided by 7",
+      `Baseline: ${base.completeDays} complete days, total ${base.totalMm} mm`,
+      `Target: baseline total divided by ${base.completeDays}`,
       `Baseline ends: ${base.days.at(-1).date} (noon UTC)`,
       `Installation: ${base.installationId}`,
       "Window: 24 hours from server acceptance",
@@ -245,7 +259,9 @@ export function createService({
       clock(),
       address,
     );
-    db.prepare("INSERT INTO challenges VALUES(?,?,?,?,?,?,?,?,?)").run(
+    db.prepare(
+      "INSERT INTO challenges (id,address,side,message,expires,total,calibration,installation,baselineDate,days) VALUES(?,?,?,?,?,?,?,?,?,?)",
+    ).run(
       id,
       address,
       side,
@@ -255,8 +271,15 @@ export function createService({
       value,
       base.installationId,
       base.days.at(-1).date,
+      base.completeDays,
     );
-    return { id, message, expiresAt: expires, averageMm: base.averageMm };
+    return {
+      id,
+      message,
+      expiresAt: expires,
+      averageMm: base.averageMm,
+      baselineDays: base.completeDays,
+    };
   }
   async function vote(id, signature) {
     if (
@@ -283,7 +306,8 @@ export function createService({
     if (
       base.installationId !== signed.installation ||
       base.days.at(-1).date !== signed.baselineDate ||
-      base.totalMm !== signed.total
+      base.totalMm !== signed.total ||
+      base.completeDays !== signed.days
     )
       throw new ApiError(
         409,
@@ -310,7 +334,7 @@ export function createService({
       )
         throw new ApiError(409, "You already have an active prediction.");
       db.prepare(
-        "INSERT INTO predictions (id,address,side,start,expires,total,calibration,installation) VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO predictions (id,address,side,start,expires,total,calibration,installation,days) VALUES(?,?,?,?,?,?,?,?,?)",
       ).run(
         predictionId,
         signed.address,
@@ -320,6 +344,7 @@ export function createService({
         signed.total,
         signed.calibration,
         signed.installation,
+        signed.days,
       );
       db.exec("COMMIT");
     } catch (error) {
@@ -428,7 +453,7 @@ export function createService({
         )
         .get(row.installation, row.start, row.expires).n;
       const distance = BigInt(count) * BigInt(row.calibration);
-      const result = outcome(distance, row.total);
+      const result = outcome(distance, row.total, row.days);
       db.prepare(
         "UPDATE predictions SET state=?,distance=?,settled=? WHERE id=? AND state='pending'",
       ).run(

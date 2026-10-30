@@ -11,6 +11,7 @@ export interface Baseline {
   totalMm: string;
   averageMm: string | null;
   ready: boolean;
+  fullWeek?: boolean;
   generatedAt: string;
   installationId: string;
 }
@@ -47,6 +48,7 @@ export interface Prediction {
   expiresAt: number;
   averageMm: string;
   totalMm: string;
+  baselineDays?: number;
   state: "pending" | "won" | "lost" | "tie";
   distanceMm: string | null;
   settledAt: number | null;

@@ -57,7 +57,7 @@ const signVote = async (service, wallet, side = "over") => {
   };
 };
 
-test("noon UTC calendar and seven complete days; current day excluded; missing is never zero", () => {
+test("noon UTC calendar, seven-day window with a three-day start; current day excluded; missing is never zero", () => {
   const feed = createFeed();
   assert.equal(deviceDay("2026-10-30T11:59:59Z"), "2026-10-29");
   assert.equal(deviceDay("2026-10-30T12:00:00Z"), "2026-10-30");
@@ -74,14 +74,33 @@ test("noon UTC calendar and seven complete days; current day excluded; missing i
   feed.state.complete = false;
   const partial = summarize(feed.stats(), feed.state.now);
   assert.equal(partial.completeDays, 6);
-  assert.equal(partial.ready, false);
+  assert.equal(partial.ready, true);
+  assert.equal(partial.fullWeek, false);
   assert.equal(partial.averageMm, "87800");
+  feed.state.missingDays = 4;
+  const starter = summarize(feed.stats(), feed.state.now);
+  assert.equal(starter.completeDays, 3);
+  assert.equal(starter.ready, true);
+  assert.equal(starter.totalMm, "263400");
+  assert.deepEqual(
+    starter.days.filter((day) => day.complete).map((day) => day.date),
+    ["2026-10-27", "2026-10-28", "2026-10-29"],
+  );
+  feed.state.missingDays = 5;
+  const tooShort = summarize(feed.stats(), feed.state.now);
+  assert.equal(tooShort.completeDays, 2);
+  assert.equal(tooShort.ready, false);
   const raw = feed.stats();
   raw.activity.days[1].distanceMm = "-1";
   assert.throws(() => parseStats(raw), /invalid daily/);
   assert.equal(outcome("87800", "614600"), "tie");
   assert.equal(outcome("87801", "614600"), "over");
   assert.equal(outcome("87799", "614600"), "under");
+  // A three-day total of 263,401 mm averages 87,800.33 mm: 87,800 is under, not a tie.
+  assert.equal(outcome("87800", "263400", 3), "tie");
+  assert.equal(outcome("87800", "263401", 3), "under");
+  assert.equal(outcome("87801", "263401", 3), "over");
+  assert.throws(() => outcome("1", "1", 0), /at least one day/);
 });
 
 test("signed prediction saves, denies spoofing, replay and duplicate pending votes", async () => {
@@ -222,13 +241,14 @@ test("stale feeds, partial weeks, inconsistent calibration, expired signatures a
     assert.equal(ctx.service.market().ready, false);
     assert.throws(() => ctx.service.challenge(wallet.address, "over"), /stale/);
     ctx.feed.state.stale = false;
-    ctx.feed.state.complete = false;
+    ctx.feed.state.missingDays = 5;
     await ctx.service.sync();
+    assert.match(ctx.service.market().reason, /3 complete days \(2\/3 available\)/);
     assert.throws(
       () => ctx.service.challenge(wallet.address, "over"),
-      /seven complete/,
+      /3 complete days/,
     );
-    ctx.feed.state.complete = true;
+    ctx.feed.state.missingDays = 0;
     ctx.feed.state.badCalibration = true;
     await ctx.service.sync();
     assert.throws(
@@ -339,5 +359,74 @@ test("scheduler runs with a short test interval without waiting 24 real hours", 
     assert.equal(ctx.service.wallet(wallet.address).player.points, 1);
   } finally {
     await ctx.close();
+  }
+});
+
+test("three complete days open voting, lock a three-day target and score against it", async () => {
+  const ctx = await setup();
+  try {
+    ctx.feed.state.missingDays = 4;
+    await ctx.service.sync();
+    assert.equal(ctx.service.market().ready, true);
+    assert.equal(ctx.service.market().baseline.completeDays, 3);
+    const alice = account(),
+      bob = account();
+    const a = await signVote(ctx.service, alice, "over");
+    assert.match(a.challenge.message, /Baseline: 3 complete days, total 263400 mm/);
+    assert.match(a.challenge.message, /Target: baseline total divided by 3/);
+    assert.equal(a.challenge.baselineDays, 3);
+    assert.equal(a.prediction.baselineDays, 3);
+    assert.equal(a.prediction.totalMm, "263400");
+    assert.equal(a.prediction.averageMm, "87800");
+    // The day count is part of the signed baseline. A fourth day completing mid-signature is refused.
+    const challenge = ctx.service.challenge(bob.address, "under");
+    const signature = await bob.signMessage({ message: challenge.message });
+    ctx.feed.state.missingDays = 3;
+    await ctx.service.sync();
+    await assert.rejects(ctx.service.vote(challenge.id, signature), /baseline changed/);
+    // Alice's locked three-day target holds after the window grows: 101 passages × 878 mm is over 87,800.
+    ctx.feed.state.passages = Array.from(
+      { length: 101 },
+      (_, index) => a.prediction.startAt + index * 1000,
+    );
+    ctx.feed.state.now = a.prediction.expiresAt;
+    ctx.feed.state.archiveThrough = a.prediction.expiresAt;
+    await ctx.service.sync();
+    const settled = ctx.service.wallet(alice.address).predictions[0];
+    assert.equal(settled.state, "won");
+    assert.equal(settled.baselineDays, 3);
+    assert.equal(ctx.service.wallet(alice.address).player.points, 1);
+    assert.equal(ctx.service.market().baseline.completeDays, 4);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test("databases from the seven-day release migrate and keep scoring old votes against seven days", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "spm-migrate-"));
+  const dbPath = join(directory, "scores.sqlite");
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    const old = new DatabaseSync(dbPath);
+    old.exec(`CREATE TABLE challenges (id TEXT PRIMARY KEY, address TEXT NOT NULL, side TEXT NOT NULL, message TEXT NOT NULL, expires INTEGER NOT NULL, total TEXT NOT NULL, calibration TEXT NOT NULL, installation TEXT NOT NULL, baselineDate TEXT NOT NULL);
+      CREATE TABLE predictions (id TEXT PRIMARY KEY, address TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('over','under')), start INTEGER NOT NULL, expires INTEGER NOT NULL, total TEXT NOT NULL, calibration TEXT NOT NULL, installation TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', distance TEXT, settled INTEGER);
+      INSERT INTO predictions (id,address,side,start,expires,total,calibration,installation) VALUES ('old','0x00000000000000000000000000000000000000a1','over',1,2,'614600','878','x');`);
+    old.close();
+    const feed = createFeed();
+    const service = createService({
+      dbPath,
+      origin: "https://spm.example",
+      clock: () => feed.state.now,
+      fetcher: feed.fetcher,
+      archiveIntervalMs: 0,
+    });
+    const [row] = service.wallet(
+      "0x00000000000000000000000000000000000000a1",
+    ).predictions;
+    assert.equal(row.baselineDays, 7);
+    assert.equal(row.averageMm, "87800");
+    await service.close();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });

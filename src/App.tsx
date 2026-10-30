@@ -7,7 +7,7 @@ import { Modal } from "./components/Modal";
 import { Icon } from "./components/Icon";
 import { Wheel } from "./components/Wheel";
 import { getConfig, getMarket, normalizeApi, post, request } from "./lib/api";
-import { km, isFresh } from "./lib/data.mjs";
+import { km, isFresh, MIN_DAYS, WINDOW_DAYS } from "./lib/data.mjs";
 import { shortAddress } from "./lib/wallet";
 import type {
   Baseline,
@@ -24,6 +24,9 @@ const dayLabel = (date: string) =>
     day: "numeric",
     timeZone: "UTC",
   });
+const NUMBER_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven"];
+const count = (value: number) => NUMBER_WORDS[value] ?? String(value);
+const capital = (text: string) => text[0].toUpperCase() + text.slice(1);
 const dateTime = (time: number) =>
   new Date(time).toLocaleString("en-US", {
     month: "short",
@@ -250,7 +253,7 @@ export function App() {
                 <>
                   <div
                     className="metric-skeleton"
-                    aria-label="Loading the seven-day baseline"
+                    aria-label="Loading the baseline"
                   />
                   <span className="muted">Fetching wheel history…</span>
                 </>
@@ -262,7 +265,7 @@ export function App() {
                     ) : (
                       <>
                         {baseline.completeDays}
-                        <span className="metric-divider">/ 7</span>
+                        <span className="metric-divider">/ {MIN_DAYS}</span>
                       </>
                     )}
                     <span className="metric-unit">
@@ -271,8 +274,8 @@ export function App() {
                   </div>
                   <div className="baseline-caption">
                     {baseline.ready
-                      ? "The last seven complete days"
-                      : "Building the seven-day baseline"}
+                      ? `Average of the last ${count(baseline.completeDays)} complete days`
+                      : "Building the baseline"}
                     <span
                       className={
                         baseline.ready ? "status-label" : "waiting-label"
@@ -385,8 +388,15 @@ export function App() {
             </div>
             {baseline && !baseline.ready && (
               <p className="baseline-note">
-                Missing days stay unknown. Predictions open with seven fully
-                recorded days.
+                Missing days stay unknown. Predictions open with {count(MIN_DAYS)}{" "}
+                fully recorded days.
+              </p>
+            )}
+            {baseline?.ready && baseline.completeDays < WINDOW_DAYS && (
+              <p className="baseline-note">
+                A full week isn’t recorded yet, so the target uses the{" "}
+                {count(baseline.completeDays)} complete days so far. It grows to
+                a {count(WINDOW_DAYS)}-day average as history builds.
               </p>
             )}
             {apiBase && data?.reason && !data.ready && baseline?.ready && (
@@ -534,7 +544,7 @@ export function App() {
               {baseline && (
                 <span>
                   {baseline.ready
-                    ? "Seven-day average"
+                    ? `${capital(count(baseline.completeDays))}-day average`
                     : `Observed average · ${baseline.completeDays} complete days`}
                 </span>
               )}
@@ -697,7 +707,7 @@ export function App() {
             <span className="step-number">1</span>
             <div>
               <strong>Pick a side</strong>
-              <p>Over or under the seven-day average.</p>
+              <p>Over or under the recent daily average.</p>
             </div>
           </div>
           <div>
@@ -787,7 +797,15 @@ function ActivePrediction({
       <dl>
         <div>
           <dt>Your target</dt>
-          <dd>{km(prediction.averageMm)} km</dd>
+          <dd>
+            {km(prediction.averageMm)} km
+            {prediction.baselineDays ? (
+              <span className="target-days">
+                {" "}
+                · {prediction.baselineDays}-day average
+              </span>
+            ) : null}
+          </dd>
         </div>
         <div>
           <dt>Result due</dt>
@@ -817,8 +835,8 @@ function HistoryChart({ baseline }: { baseline?: Baseline | null }) {
       role="img"
       aria-label={
         baseline
-          ? `Seven completed calendar days. ${baseline.completeDays} days fully covered. Daily values follow in See daily distances.`
-          : "Waiting for seven-day history."
+          ? `The last seven calendar days. ${baseline.completeDays} days fully covered. Daily values follow in See daily distances.`
+          : "Waiting for wheel history."
       }
     >
       <div className="chart-grid-lines">
@@ -907,11 +925,15 @@ function Rules({ onClose }: { onClose: () => void }) {
       </p>
       <ol className="rules-list">
         <li>
-          <strong>Seven days set the target.</strong>
+          <strong>Recent days set the target.</strong>
           <p>
-            The average uses the previous seven complete noon-to-noon UTC days.
-            Missing data is never counted as zero. Kilometres are rounded for
-            display; scoring uses exact millimetres and the unrounded average.
+            The average uses every complete noon-to-noon UTC day in the past
+            seven. Until a full week is recorded, predictions open once{" "}
+            {count(MIN_DAYS)} complete days exist, and the average grows to{" "}
+            {count(WINDOW_DAYS)} days by itself.
+            Missing or partial days are never counted as zero. Kilometres are
+            rounded for display; scoring uses exact millimetres and the
+            unrounded average your prediction locked in.
           </p>
         </li>
         <li>
