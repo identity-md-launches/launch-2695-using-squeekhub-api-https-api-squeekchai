@@ -1,0 +1,15 @@
+# Budget and explicit export policy: artifacts/BUNDLE.md (this file <= 1 KiB).
+**/node_modules/
+**/.vite/
+**/.cache/
+**/.npm/
+**/.pnpm-store/
+**/.yarn/cache/
+**/coverage/
+**/*.tsbuildinfo
+/test/scratch/
+/data/*.sqlite
+/data/*.sqlite-shm
+/data/*.sqlite-wal
+/.playwright-mcp/
+# dist/ is a required, included deliverable. Do not ignore it.
